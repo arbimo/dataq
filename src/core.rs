@@ -1,4 +1,111 @@
-use crate::database::*;
+pub type Sym = u32;
+
+type Tuple<E, const N: usize> = [E; 3];
+
+type Fact<const N: usize> = Tuple<Sym, N>;
+type FactID = usize;
+
+/// A set of fact with uniform length `N`
+#[derive(Default)]
+struct Db<const N: usize> {
+    facts: Vec<Fact<N>>,
+}
+
+impl<const N: usize> Db<N> {
+    pub fn add_fact(&mut self, f: Fact<N>) {
+        self.facts.push(f)
+    }
+    pub fn add_fact_n(&mut self, f: &[Sym]) {
+        assert_eq!(f.len(), N);
+        self.add_fact(f.try_into().unwrap())
+    }
+
+    pub fn next_match(&self, pattern: &Pattern, next_index: FactID) -> Option<(FactID, &[Sym])> {
+        for (offset, fact) in self.facts[next_index..].iter().enumerate() {
+            if pattern.matches(fact) {
+                return Some((next_index + offset, fact));
+            }
+        }
+        return None;
+    }
+}
+
+/// A set of facts.
+///
+/// Facts are grouped together organized based on their length.
+#[derive(Default)]
+pub struct Database {
+    db1: Db<1>,
+    db2: Db<2>,
+    db3: Db<3>,
+    db4: Db<4>,
+    db5: Db<5>,
+    db6: Db<6>,
+}
+
+impl Database {
+    pub fn new() -> Database {
+        Database::default()
+    }
+
+    pub fn add_fact(&mut self, f: &[Sym]) {
+        match f.len() {
+            1 => self.db1.add_fact_n(&f),
+            2 => self.db2.add_fact_n(&f),
+            3 => self.db3.add_fact_n(&f),
+            4 => self.db4.add_fact_n(&f),
+            5 => self.db5.add_fact_n(&f),
+            6 => self.db6.add_fact_n(&f),
+            _ => panic!("Unsupported number of elements in fact"),
+        }
+    }
+
+    pub fn next_match(&self, pattern: &Pattern, next_index: FactID) -> Option<(FactID, &[Sym])> {
+        match pattern.0.len() {
+            1 => self.db1.next_match(pattern, next_index),
+            2 => self.db2.next_match(pattern, next_index),
+            3 => self.db3.next_match(pattern, next_index),
+            4 => self.db4.next_match(pattern, next_index),
+            5 => self.db5.next_match(pattern, next_index),
+            6 => self.db6.next_match(pattern, next_index),
+            _ => panic!("Unsupported number of elements in pattern"),
+        }
+    }
+
+    pub fn run(&self, query: Query) -> impl Iterator<Item = Assignment> + '_ {
+        QueryState::new(query, self)
+    }
+}
+
+#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
+pub enum PatternAtom {
+    Wildcard,
+    Sym(Sym),
+}
+impl PatternAtom {
+    fn matches(self, sym: Sym) -> bool {
+        match self {
+            PatternAtom::Wildcard => true,
+            PatternAtom::Sym(s) => s == sym,
+        }
+    }
+}
+
+pub struct Pattern(Vec<PatternAtom>);
+
+impl Pattern {
+    pub fn new(elems: Vec<PatternAtom>) -> Self {
+        Pattern(elems)
+    }
+
+    fn matches(&self, fact: &[Sym]) -> bool {
+        self.0
+            .iter()
+            .zip(fact.iter())
+            .all(|(pat, sym)| pat.matches(*sym))
+    }
+}
+
 use itertools::*;
 
 pub type Var = u16;
@@ -9,7 +116,7 @@ pub enum Atom {
     Sym(Sym),
 }
 
-struct LiftedFact([Atom; 3]);
+struct LiftedFact(Vec<Atom>);
 
 impl LiftedFact {
     pub fn vars(&self) -> impl Iterator<Item = Var> + '_ {
@@ -22,7 +129,7 @@ impl LiftedFact {
             .unique()
     }
 
-    pub fn atoms(&self) -> &[Atom; 3] {
+    pub fn atoms(&self) -> &[Atom] {
         &self.0
     }
 }
@@ -32,10 +139,10 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn single(elem: Tuple<Atom>) -> Self {
-        Query::from(vec![elem])
+    pub fn single(elem: &[Atom]) -> Self {
+        Query::from(vec![Vec::from(elem)])
     }
-    pub fn from(facts: Vec<Tuple<Atom>>) -> Self {
+    pub fn from(facts: Vec<Vec<Atom>>) -> Self {
         Query {
             elems: facts.iter().cloned().map(|v| LiftedFact(v)).collect(),
         }
@@ -52,9 +159,11 @@ impl Query {
     }
 }
 
-type Assignment = Vec<Sym>;
+/// Associated each variable id with its value in the assignment.
+pub type Assignment = Vec<Sym>;
 
-pub struct State<'db> {
+/// State of a query being executed.
+struct QueryState<'db> {
     database: &'db Database,
     query: Query,
     fact_support: Vec<usize>,
@@ -63,11 +172,11 @@ pub struct State<'db> {
     trail: Vec<(usize, Var)>,
 }
 
-impl<'db> State<'db> {
-    pub fn new(query: Query, database: &'db Database) -> State {
+impl<'db> QueryState<'db> {
+    pub fn new(query: Query, database: &'db Database) -> QueryState {
         let num_vars = query.num_vars();
         let num_patterns = query.elems.len();
-        State {
+        QueryState {
             database,
             query,
             fact_support: (0..num_patterns).map(|_| 0).collect(),
@@ -157,16 +266,49 @@ impl<'db> State<'db> {
     }
 }
 
+impl Iterator for QueryState<'_> {
+    type Item = Assignment;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next()
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use super::*;
 
-    use crate::query::{Atom, Query};
+    pub fn database_triples() -> Database {
+        let mut db = Database::new();
+        db.add_fact(&[1, 2, 1]);
+        db.add_fact(&[1, 2, 2]);
+        db.add_fact(&[1, 2, 3]);
+        db.add_fact(&[1, 2, 4]);
+        db.add_fact(&[1, 2, 5]);
+
+        db.add_fact(&[2, 2, 1]);
+        db.add_fact(&[2, 2, 2]);
+        db.add_fact(&[2, 2, 3]);
+        db.add_fact(&[2, 2, 4]);
+        db.add_fact(&[2, 2, 5]);
+        db.add_fact(&[2, 2, 6]);
+        db.add_fact(&[2, 2, 7]);
+
+        db.add_fact(&[1, 3, 1]);
+        db.add_fact(&[1, 3, 2]);
+        db.add_fact(&[1, 3, 3]);
+        db.add_fact(&[1, 3, 4]);
+        db.add_fact(&[1, 3, 5]);
+        db.add_fact(&[1, 3, 6]);
+
+        db
+    }
 
     #[test]
-    fn test_query() {
-        let db = crate::database::test::database();
+    fn test_query_triples() {
+        let db = crate::core::test::database_triples();
 
-        let query = Query::single([Atom::Sym(1), Atom::Sym(2), Atom::Var(0)]);
+        let query = Query::single(&[Atom::Sym(1), Atom::Sym(2), Atom::Var(0)]);
         let mut state = db.run(query);
         assert_eq!(state.next(), Some(vec![1]));
         assert_eq!(state.next(), Some(vec![2]));
@@ -175,42 +317,42 @@ mod test {
         assert_eq!(state.next(), Some(vec![5]));
         assert_eq!(state.next(), None);
 
-        let query = Query::single([Atom::Var(0), Atom::Var(1), Atom::Sym(6)]);
+        let query = Query::single(&[Atom::Var(0), Atom::Var(1), Atom::Sym(6)]);
         let mut state = db.run(query);
         assert_eq!(state.next(), Some(vec![2, 2]));
         assert_eq!(state.next(), Some(vec![1, 3]));
         assert_eq!(state.next(), None);
 
-        let mut state = db.run(Query::single([Atom::Sym(1), Atom::Var(0), Atom::Sym(3)]));
+        let mut state = db.run(Query::single(&[Atom::Sym(1), Atom::Var(0), Atom::Sym(3)]));
         assert_eq!(state.next(), Some(vec![2]));
         assert_eq!(state.next(), Some(vec![3]));
         assert_eq!(state.next(), None);
 
-        let query = Query::single([Atom::Sym(1), Atom::Var(0), Atom::Sym(3)]);
+        let query = Query::single(&[Atom::Sym(1), Atom::Var(0), Atom::Sym(3)]);
         let mut state = db.run(query);
         assert_eq!(state.next(), Some(vec![2]));
         assert_eq!(state.next(), Some(vec![3]));
         assert_eq!(state.next(), None);
 
         let query = Query::from(vec![
-            [Atom::Var(0), Atom::Var(1), Atom::Sym(3)],
-            [Atom::Var(0), Atom::Var(2), Atom::Sym(7)],
+            vec![Atom::Var(0), Atom::Var(1), Atom::Sym(3)],
+            vec![Atom::Var(0), Atom::Var(2), Atom::Sym(7)],
         ]);
         let mut state = db.run(query);
         assert_eq!(state.next(), Some(vec![2, 2, 2]));
         assert_eq!(state.next(), None);
 
         let query = Query::from(vec![
-            [Atom::Var(0), Atom::Var(2), Atom::Sym(7)],
-            [Atom::Var(0), Atom::Var(1), Atom::Sym(3)],
+            vec![Atom::Var(0), Atom::Var(2), Atom::Sym(7)],
+            vec![Atom::Var(0), Atom::Var(1), Atom::Sym(3)],
         ]);
         let mut state = db.run(query);
         assert_eq!(state.next(), Some(vec![2, 2, 2]));
         assert_eq!(state.next(), None);
 
         let query = Query::from(vec![
-            [Atom::Var(2), Atom::Var(1), Atom::Sym(7)],
-            [Atom::Var(2), Atom::Var(0), Atom::Sym(3)],
+            vec![Atom::Var(2), Atom::Var(1), Atom::Sym(7)],
+            vec![Atom::Var(2), Atom::Var(0), Atom::Sym(3)],
         ]);
         let mut state = db.run(query);
         assert_eq!(state.next(), Some(vec![2, 2, 2]));
