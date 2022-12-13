@@ -26,7 +26,7 @@ impl<const N: usize> Db<N> {
                 return Some((next_index + offset, fact));
             }
         }
-        return None;
+        None
     }
 }
 
@@ -50,12 +50,12 @@ impl Database {
 
     pub fn add_fact(&mut self, f: &[Sym]) {
         match f.len() {
-            1 => self.db1.add_fact_n(&f),
-            2 => self.db2.add_fact_n(&f),
-            3 => self.db3.add_fact_n(&f),
-            4 => self.db4.add_fact_n(&f),
-            5 => self.db5.add_fact_n(&f),
-            6 => self.db6.add_fact_n(&f),
+            1 => self.db1.add_fact_n(f),
+            2 => self.db2.add_fact_n(f),
+            3 => self.db3.add_fact_n(f),
+            4 => self.db4.add_fact_n(f),
+            5 => self.db5.add_fact_n(f),
+            6 => self.db6.add_fact_n(f),
             _ => panic!("Unsupported number of elements in fact"),
         }
     }
@@ -144,7 +144,7 @@ impl Query {
     }
     pub fn from(facts: Vec<Vec<Atom>>) -> Self {
         Query {
-            elems: facts.iter().cloned().map(|v| LiftedFact(v)).collect(),
+            elems: facts.iter().cloned().map(LiftedFact).collect(),
         }
     }
     pub fn vars(&self) -> impl Iterator<Item = Var> + '_ {
@@ -278,7 +278,7 @@ impl Iterator for QueryState<'_> {
 mod test {
     use super::*;
 
-    pub fn database_triples() -> Database {
+    pub fn database() -> Database {
         let mut db = Database::new();
         db.add_fact(&[1, 2, 1]);
         db.add_fact(&[1, 2, 2]);
@@ -305,57 +305,57 @@ mod test {
     }
 
     #[test]
-    fn test_query_triples() {
-        let db = crate::core::test::database_triples();
+    fn test_queries() {
+        let db = database();
 
         let query = Query::single(&[Atom::Sym(1), Atom::Sym(2), Atom::Var(0)]);
-        let mut state = db.run(query);
-        assert_eq!(state.next(), Some(vec![1]));
-        assert_eq!(state.next(), Some(vec![2]));
-        assert_eq!(state.next(), Some(vec![3]));
-        assert_eq!(state.next(), Some(vec![4]));
-        assert_eq!(state.next(), Some(vec![5]));
-        assert_eq!(state.next(), None);
+        let mut assignments = db.run(query);
+        assert_eq!(assignments.next(), Some(vec![1])); // var(0) => 1   (first assignment)
+        assert_eq!(assignments.next(), Some(vec![2])); // var(0) => 2   (second assignment)
+        assert_eq!(assignments.next(), Some(vec![3])); // ...
+        assert_eq!(assignments.next(), Some(vec![4]));
+        assert_eq!(assignments.next(), Some(vec![5]));
+        assert_eq!(assignments.next(), None); // no assingmnent left
 
         let query = Query::single(&[Atom::Var(0), Atom::Var(1), Atom::Sym(6)]);
-        let mut state = db.run(query);
-        assert_eq!(state.next(), Some(vec![2, 2]));
-        assert_eq!(state.next(), Some(vec![1, 3]));
-        assert_eq!(state.next(), None);
+        let mut assignments = db.run(query);
+        assert_eq!(assignments.next(), Some(vec![2, 2])); // (var(0) => 2, var(1) => 2 (first assignment)
+        assert_eq!(assignments.next(), Some(vec![1, 3])); // (var(0) => 1, var(1) => 3 (second assignment)
+        assert_eq!(assignments.next(), None); // no assignment left
 
-        let mut state = db.run(Query::single(&[Atom::Sym(1), Atom::Var(0), Atom::Sym(3)]));
-        assert_eq!(state.next(), Some(vec![2]));
-        assert_eq!(state.next(), Some(vec![3]));
-        assert_eq!(state.next(), None);
+        let mut assignments = db.run(Query::single(&[Atom::Sym(1), Atom::Var(0), Atom::Sym(3)]));
+        assert_eq!(assignments.next(), Some(vec![2]));
+        assert_eq!(assignments.next(), Some(vec![3]));
+        assert_eq!(assignments.next(), None);
 
         let query = Query::single(&[Atom::Sym(1), Atom::Var(0), Atom::Sym(3)]);
-        let mut state = db.run(query);
-        assert_eq!(state.next(), Some(vec![2]));
-        assert_eq!(state.next(), Some(vec![3]));
-        assert_eq!(state.next(), None);
+        let mut assignments = db.run(query);
+        assert_eq!(assignments.next(), Some(vec![2]));
+        assert_eq!(assignments.next(), Some(vec![3]));
+        assert_eq!(assignments.next(), None);
 
         let query = Query::from(vec![
             vec![Atom::Var(0), Atom::Var(1), Atom::Sym(3)],
             vec![Atom::Var(0), Atom::Var(2), Atom::Sym(7)],
         ]);
-        let mut state = db.run(query);
-        assert_eq!(state.next(), Some(vec![2, 2, 2]));
-        assert_eq!(state.next(), None);
+        let mut assignments = db.run(query);
+        assert_eq!(assignments.next(), Some(vec![2, 2, 2]));
+        assert_eq!(assignments.next(), None);
 
         let query = Query::from(vec![
             vec![Atom::Var(0), Atom::Var(2), Atom::Sym(7)],
             vec![Atom::Var(0), Atom::Var(1), Atom::Sym(3)],
         ]);
-        let mut state = db.run(query);
-        assert_eq!(state.next(), Some(vec![2, 2, 2]));
-        assert_eq!(state.next(), None);
+        let mut assignments = db.run(query);
+        assert_eq!(assignments.next(), Some(vec![2, 2, 2]));
+        assert_eq!(assignments.next(), None);
 
         let query = Query::from(vec![
             vec![Atom::Var(2), Atom::Var(1), Atom::Sym(7)],
             vec![Atom::Var(2), Atom::Var(0), Atom::Sym(3)],
         ]);
-        let mut state = db.run(query);
-        assert_eq!(state.next(), Some(vec![2, 2, 2]));
-        assert_eq!(state.next(), None);
+        let mut assignments = db.run(query);
+        assert_eq!(assignments.next(), Some(vec![2, 2, 2]));
+        assert_eq!(assignments.next(), None);
     }
 }
