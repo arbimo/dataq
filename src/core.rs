@@ -1,6 +1,6 @@
 pub type Sym = u32;
 
-type Tuple<E, const N: usize> = [E; 3];
+type Tuple<E, const N: usize> = [E; N];
 
 type Fact<const N: usize> = Tuple<Sym, N>;
 type FactID = usize;
