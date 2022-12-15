@@ -205,12 +205,21 @@ impl<'db> QueryState<'db> {
     }
 
     pub fn next(&mut self) -> Option<Assignment> {
-        if self.next_unsupported_fact == self.fact_support.len() {
-            // at a solution, undo it
-            self.undo_last()
-        } else {
-            // must be at init
+        let no_solution_left_marker = self.fact_support.len() + 1;
+        if self.next_unsupported_fact == no_solution_left_marker {
+            // we already went through all solutions
+            return None;
+        } else if self.next_unsupported_fact != self.fact_support.len() {
+            // not at a solution, must be at init
             assert_eq!(self.next_unsupported_fact, 0);
+        } else if self.fact_support.is_empty() {
+            // no fact to support.
+            self.next_unsupported_fact = no_solution_left_marker;
+            return Some(Vec::new());
+        } else {
+            // we are at solution (result of a previous iteration.
+            // backtrack before continuing the search
+            self.undo_last()
         }
         while self.next_unsupported_fact < self.fact_support.len() {
             // we have at least a fact that is not supported
@@ -245,7 +254,8 @@ impl<'db> QueryState<'db> {
                 // no support for this fact, backtrack
                 self.fact_support[self.next_unsupported_fact] = 0;
                 if self.next_unsupported_fact == 0 {
-                    // nothing to backtrack from
+                    // nothing to backtrack from, mark search space as exhausted and return "no solution"
+                    self.next_unsupported_fact = no_solution_left_marker;
                     return None;
                 }
                 self.undo_last();
@@ -356,6 +366,12 @@ mod test {
         ]);
         let mut assignments = db.run(query);
         assert_eq!(assignments.next(), Some(vec![2, 2, 2]));
+        assert_eq!(assignments.next(), None);
+
+        // empty query should return the empty assignment
+        let query = Query::from(vec![]);
+        let mut assignments = db.run(query);
+        assert_eq!(assignments.next(), Some(vec![]));
         assert_eq!(assignments.next(), None);
     }
 }
